@@ -82,6 +82,9 @@ public:
         if (config.conf[name].contains("ignoreSilence")) {
             ignoreSilence = config.conf[name]["ignoreSilence"];
         }
+        if (config.conf[name].contains("splitFile")) {
+            splitFile = config.conf[name]["splitFile"];
+        }
         if (config.conf[name].contains("nameTemplate")) {
             std::string _nameTemplate = config.conf[name]["nameTemplate"];
             if (_nameTemplate.length() > sizeof(nameTemplate)-1) {
@@ -150,10 +153,7 @@ public:
         return enabled;
     }
 
-    void start() {
-        std::lock_guard<std::recursive_mutex> lck(recMtx);
-        if (recording) { return; }
-
+    void setupWriter() {
         // Configure the wav writer
         if (recMode == RECORDER_MODE_AUDIO) {
             if (selectedStreamName.empty()) { return; }
@@ -177,7 +177,13 @@ public:
             return;
         }
 
-        // Open audio stream or baseband
+    }
+
+    void start() {
+        std::lock_guard<std::recursive_mutex> lck(recMtx);
+        if (recording) { return; }
+                // Open audio stream or baseband
+
         if (recMode == RECORDER_MODE_AUDIO) {
             // Start correct path depending on 
             if (stereo) {
@@ -196,14 +202,13 @@ public:
             basebandSink.start();
             sigpath::iqFrontEnd.bindIQStream(basebandStream);
         }
-
         recording = true;
     }
 
     void stop() {
         std::lock_guard<std::recursive_mutex> lck(recMtx);
         if (!recording) { return; }
-
+        writer.close();
         // Close audio stream or baseband
         if (recMode == RECORDER_MODE_AUDIO) {
             splitter.unbindStream(&stereoStream);
@@ -211,17 +216,15 @@ public:
             stereoSink.stop();
             s2m.stop();
             
+            
         }
         else {
             // Unbind and destroy IQ stream
             sigpath::iqFrontEnd.unbindIQStream(basebandStream);
             basebandSink.stop();
             delete basebandStream;
+            
         }
-
-        // Close file
-        writer.close();
-        
         recording = false;
     }
 
@@ -320,6 +323,12 @@ private:
             if (ImGui::Checkbox(CONCAT("Ignore silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
                 config.acquire();
                 config.conf[_this->name]["ignoreSilence"] = _this->ignoreSilence;
+                config.release(true);
+            }
+
+            if (ImGui::Checkbox(CONCAT("Split File##_recorder_split_file_", _this->name), &_this->splitFile)) {
+                config.acquire();
+                config.conf[_this->name]["splitFile"] = _this->splitFile;
                 config.release(true);
             }
         }
@@ -501,6 +510,7 @@ private:
 
     static void complexHandler(dsp::complex_t* data, int count, void* ctx) {
         RecorderModule* _this = (RecorderModule*)ctx;
+        if (!_this->writer.isOpen()){ _this->setupWriter(); }
         _this->writer.write((float*)data, count);
     }
 
@@ -515,8 +525,13 @@ private:
                 if (val > absMax) { absMax = val; }
             }
             _this->ignoringSilence = (absMax < SILENCE_LVL);
-            if (_this->ignoringSilence) { return; }
+            if (_this->ignoringSilence) { 
+                if (_this->splitFile) { _this->writer.close(); }
+                return; 
+            }
         }
+
+        if (!_this->writer.isOpen()){ _this->setupWriter(); }
         _this->writer.write((float*)data, count);
     }
 
@@ -529,8 +544,13 @@ private:
                 if (val > absMax) { absMax = val; }
             }
             _this->ignoringSilence = (absMax < SILENCE_LVL);
-            if (_this->ignoringSilence) { return; }
+            if (_this->ignoringSilence) { 
+                if (_this->splitFile) { _this->writer.close(); }
+                return; 
+            }
         }
+
+        if (!_this->writer.isOpen()){ _this->setupWriter(); }
         _this->writer.write(data, count);
     }
 
@@ -570,6 +590,7 @@ private:
     std::string selectedStreamName = "";
     float audioVolume = 1.0f;
     bool ignoreSilence = false;
+    bool splitFile = false;
     dsp::stereo_t audioLvl = { -100.0f, -100.0f };
 
     bool recording = false;
