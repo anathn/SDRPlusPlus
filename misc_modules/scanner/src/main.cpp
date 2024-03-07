@@ -3,6 +3,8 @@
 #include <gui/gui.h>
 #include <gui/style.h>
 #include <signal_path/signal_path.h>
+#include <config.h>
+#include <core.h>
 
 SDRPP_MOD_INFO{
     /* Name:            */ "scanner",
@@ -12,10 +14,37 @@ SDRPP_MOD_INFO{
     /* Max instances    */ 1
 };
 
+ConfigManager config;
+
 class ScannerModule : public ModuleManager::Instance {
 public:
     ScannerModule(std::string name) {
         this->name = name;
+        // Load config 
+        config.acquire();
+
+        if (config.conf[name].contains("start")) {
+            startFreq = config.conf[name]["start"];
+        }
+        if (config.conf[name].contains("stop")) {
+            stopFreq = config.conf[name]["stop"];
+        }
+        if (config.conf[name].contains("interval")) {
+            interval = config.conf[name]["interval"];
+        }
+        if (config.conf[name].contains("passbandRatio")) {
+            passbandRatio = config.conf[name]["passbandRatio"];
+        }
+        if (config.conf[name].contains("tuningTime")) {
+            tuningTime = config.conf[name]["tuningTime"];
+        }
+        if (config.conf[name].contains("lingerTime")) {
+            lingerTime = config.conf[name]["lingerTime"];
+        }
+        if (config.conf[name].contains("level")) {
+            level = config.conf[name]["level"];
+        }
+        config.release();
         gui::menu.registerEntry(name, menuHandler, this, NULL);
     }
 
@@ -48,37 +77,59 @@ private:
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputDouble("##start_freq_scanner", &_this->startFreq, 100.0, 100000.0, "%0.0f")) {
             _this->startFreq = round(_this->startFreq);
+            config.acquire();
+            config.conf[_this->name]["start"] = _this->startFreq;
+            config.release(true);
         }
         ImGui::LeftLabel("Stop");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputDouble("##stop_freq_scanner", &_this->stopFreq, 100.0, 100000.0, "%0.0f")) {
             _this->stopFreq = round(_this->stopFreq);
+            config.acquire();
+            config.conf[_this->name]["stop"] = _this->stopFreq;
+            config.release(true);
         }
         ImGui::LeftLabel("Interval");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputDouble("##interval_scanner", &_this->interval, 100.0, 100000.0, "%0.0f")) {
             _this->interval = round(_this->interval);
+            config.acquire();
+            config.conf[_this->name]["interval"] = _this->interval;
+            config.release(true);
         }
         ImGui::LeftLabel("Passband Ratio (%)");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputDouble("##pb_ratio_scanner", &_this->passbandRatio, 1.0, 10.0, "%0.0f")) {
             _this->passbandRatio = std::clamp<double>(round(_this->passbandRatio), 1.0, 100.0);
+            config.acquire();
+            config.conf[_this->name]["passbandRatio"] = _this->passbandRatio;
+            config.release(true);
         }
         ImGui::LeftLabel("Tuning Time (ms)");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputInt("##tuning_time_scanner", &_this->tuningTime, 100, 1000)) {
             _this->tuningTime = std::clamp<int>(_this->tuningTime, 100, 10000.0);
+            config.acquire();
+            config.conf[_this->name]["tuningTime"] = _this->tuningTime;
+            config.release(true);
         }
         ImGui::LeftLabel("Linger Time (ms)");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputInt("##linger_time_scanner", &_this->lingerTime, 100, 1000)) {
             _this->lingerTime = std::clamp<int>(_this->lingerTime, 100, 10000.0);
+            config.acquire();
+            config.conf[_this->name]["lingerTime"] = _this->lingerTime;
+            config.release(true);
         }
         if (_this->running) { ImGui::EndDisabled(); }
 
         ImGui::LeftLabel("Level");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-        ImGui::SliderFloat("##scanner_level", &_this->level, -150.0, 0.0);
+        if (ImGui::SliderFloat("##scanner_level", &_this->level, -150.0, 0.0)) {
+            config.acquire();
+            config.conf[_this->name]["level"] = _this->level;
+            config.release(true);
+        }
 
         ImGui::BeginTable(("scanner_bottom_btn_table" + _this->name).c_str(), 2);
         ImGui::TableNextRow();
@@ -290,7 +341,11 @@ private:
 };
 
 MOD_EXPORT void _INIT_() {
-    // Nothing here
+    std::string root = (std::string)core::args["root"];
+    json def = json({});
+    config.setPath(root + "/scanner_config.json");
+    config.load(def);
+    config.enableAutoSave();
 }
 
 MOD_EXPORT ModuleManager::Instance* _CREATE_INSTANCE_(std::string name) {
